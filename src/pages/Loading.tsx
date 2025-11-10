@@ -68,6 +68,7 @@ const Loading = () => {
         const result = AnalysisResultSchema.parse(data);
         setApiResult(result);
         setIsApiComplete(true);
+        setIsFromCache(false); // Explicitly mark as fresh API result
         
         // Cache the result
         setCachedReport(query, result);
