@@ -104,12 +104,12 @@ const Loading = () => {
       }, delay);
     };
 
-    // Stagger the progress bars - first 4 complete normally, last one waits for API
-    animateBar('analyzing', 0, 1500);
-    animateBar('fetching', 500, 2000);
-    animateBar('extracting', 1200, 2500);
-    animateBar('computing', 2000, 2000);
-    animateBar('building', 3000, 3000, 95); // Only goes to 95%, waits for API
+    // Stagger the progress bars - much slower to match realistic API response time
+    animateBar('analyzing', 0, 4000);
+    animateBar('fetching', 2000, 6000);
+    animateBar('extracting', 4000, 8000);
+    animateBar('computing', 8000, 10000);
+    animateBar('building', 12000, 15000, 95); // Only goes to 95%, waits for API
   }, [error]);
 
   // Complete the last progress bar when API is done
