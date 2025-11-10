@@ -16,6 +16,7 @@ const Loading = () => {
   const [isApiComplete, setIsApiComplete] = useState(false);
   const [apiResult, setApiResult] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
+  const [isFromCache, setIsFromCache] = useState(false);
   const { getCachedReport, setCachedReport, saveReportToDatabase } = useReportCache();
   const [progressBars, setProgressBars] = useState({
     analyzing: 0,
@@ -49,6 +50,7 @@ const Loading = () => {
       });
       setApiResult(cached);
       setIsApiComplete(true);
+      setIsFromCache(true); // Mark as from cache to prevent duplicate DB save
       toast.success("Loaded from cache");
       return;
     }
@@ -121,8 +123,8 @@ const Loading = () => {
   useEffect(() => {
     const allComplete = Object.values(progressBars).every(v => v >= 100);
     if (isApiComplete && allComplete && apiResult) {
-      // Save to database if user is logged in
-      if (user) {
+      // Only save to database if user is logged in AND result is NOT from cache
+      if (user && !isFromCache) {
         saveReportToDatabase(query, apiResult, user.id);
       }
       
@@ -136,7 +138,7 @@ const Loading = () => {
         });
       }, 300);
     }
-  }, [isApiComplete, progressBars, apiResult, query, navigate, user, saveReportToDatabase]);
+  }, [isApiComplete, progressBars, apiResult, query, navigate, user, saveReportToDatabase, isFromCache]);
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center relative overflow-hidden">
