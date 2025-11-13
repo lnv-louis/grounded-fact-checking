@@ -76,6 +76,23 @@ export const useReportCache = () => {
     userId: string
   ) => {
     try {
+      // Check if a report for this user and query already exists
+      const { data: existing, error: selectError } = await supabase
+        .from('user_reports')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('query', query)
+        .maybeSingle();
+
+      if (selectError && selectError.code !== 'PGRST116') {
+        console.warn('Could not verify existing report, proceeding to save:', selectError);
+      }
+
+      if (existing) {
+        // Already saved, skip insert
+        return;
+      }
+
       const { error } = await supabase
         .from('user_reports')
         .insert({
