@@ -125,8 +125,17 @@ const Loading = () => {
     const allComplete = Object.values(progressBars).every(v => v >= 100);
     if (isApiComplete && allComplete && apiResult) {
       // Only save to database if user is logged in AND result is NOT from cache
-      if (user && !isFromCache) {
-        saveReportToDatabase(query, apiResult, user.id);
+      if (!isFromCache) {
+        if (user?.id) {
+          saveReportToDatabase(query, apiResult, user.id)
+            .catch((err) => {
+              console.error('Failed to save report:', err);
+              toast.error('Failed to save report to your account');
+            });
+        } else {
+          console.warn('User not authenticated - report will not be saved');
+          toast.info('Sign in to save reports to your account');
+        }
       }
       
       setTimeout(() => {
