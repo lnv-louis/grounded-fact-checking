@@ -455,6 +455,17 @@ CRITICAL RULES:
       }
     }
     
+    // Filter out invalid edges (missing source_index or target_index)
+    if (analysisData.edges) {
+      analysisData.edges = analysisData.edges.filter((edge: any) => {
+        const isValid = typeof edge.source_index === 'number' && typeof edge.target_index === 'number';
+        if (!isValid) {
+          console.warn('Filtering out invalid edge:', edge);
+        }
+        return isValid;
+      });
+    }
+    
     // Add metadata about extraction
     analysisData.extraction_metadata = {
       content_extracted: extractionSuccess,
