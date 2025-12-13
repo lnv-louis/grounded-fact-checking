@@ -1,291 +1,412 @@
-# Key Claims UI Display Pattern
+# News Studio UI Display Pattern
 
-This document describes how to parse and display news claims with source traceability, confidence scores, and source chains - as implemented in the Grounded project.
+This document describes how to parse and display news articles in a research environment with topic-based organization, sentiment analysis, and source aggregation.
 
-## Screenshot Reference
+## Use Case
 
-The UI displays news claims as a list of cards, each containing:
-- **Claim text** (main headline/assertion)
-- **Confidence badge** (percentage, color-coded)
-- **Confidence explanation** (grey subtext)
-- **Source chain** (badges showing source attribution flow)
-
----
-
-## 1. Data Schema
-
-### Claim Object
-
-```typescript
-interface Claim {
-  claim_text: string;           // The main claim/assertion text
-  confidence: number;           // 0.0 to 1.0 (displayed as percentage)
-  confidence_explanation?: string; // Why this confidence level was assigned
-  position: number;             // Order/index of the claim
-  source_chain?: string;        // Attribution chain (see format below)
-}
-```
-
-### Source Object
-
-```typescript
-interface Source {
-  outlet_name: string;                          // e.g., "The Guardian"
-  url: string;                                  // Full URL to the article
-  url_valid?: boolean;                          // Whether URL was verified
-  publish_date?: string | null;                 // ISO date or null
-  political_lean?: 'left' | 'center' | 'right' | '';
-  source_type: 'primary' | 'secondary' | 'tertiary';
-  category?: string;                            // e.g., "Politics", "Technology"
-  image_url?: string;                           // Optional thumbnail
-}
-```
+A **News Research Environment** that:
+- Aggregates news from NewsAPI by topic/watchlist
+- Displays articles in organized, scannable rows
+- Shows sentiment analysis (Positive/Neutral/Negative)
+- Tracks sources and article counts
+- Supports AI-generated topic suggestions
 
 ---
 
-## 2. Source Chain Format
+## 1. Data Schemas
 
-The `source_chain` field uses a specific string format to represent attribution:
-
-```
-{SourceName} ({type}) [{url}] → {SourceName} ({type}) [{url}]
-```
-
-### Examples:
-
-```
-Downing Street official spokesperson (primary) → The Guardian (secondary) [https://theguardian.com/article]
-```
-
-```
-NASA Official Statement (primary) [https://nasa.gov/press] → Reuters (secondary) [https://reuters.com/article] → BBC News (tertiary) [https://bbc.com/news]
-```
-
-### Parsing Logic:
+### Article Object (from NewsAPI)
 
 ```typescript
-const parseSourceChain = (chain: string) => {
-  const parts = chain.split('→').map(s => s.trim());
-  return parts.map(part => {
-    // Match: "SourceName (type) [optional-url]"
-    const match = part.match(/^(.+?)\s*\((\w+)\)(?:\s*\[(.+?)\])?$/);
-    if (match) {
-      return {
-        name: match[1].trim(),
-        type: match[2] as 'primary' | 'secondary' | 'tertiary',
-        url: match[3]?.trim(),
-      };
-    }
-    return { name: part, type: 'secondary' as const, url: undefined };
-  });
+interface Article {
+  id: string;                    // Unique identifier
+  title: string;                 // Article headline
+  description: string;           // Short summary/excerpt
+  content: string;               // Full article text (if available)
+  url: string;                   // Link to original article
+  image_url?: string;            // Thumbnail image
+  published_at: string;          // ISO timestamp
+  source: {
+    name: string;                // e.g., "Reuters", "Bloomberg"
+    url?: string;                // Source homepage
+  };
+  sentiment?: 'positive' | 'neutral' | 'negative';
+  sentiment_score?: number;      // -1.0 to 1.0
+  topics?: string[];             // Associated topics/tags
+}
+```
+
+### Topic/Watchlist Object
+
+```typescript
+interface Topic {
+  id: string;
+  name: string;                  // e.g., "US inflation soft landing outlook"
+  query: string;                 // Search query for NewsAPI
+  article_count: number;
+  source_count: number;
+  sentiment_breakdown: {
+    positive: number;
+    neutral: number;
+    negative: number;
+  };
+  last_updated: string;
+}
+```
+
+### Dashboard Metrics
+
+```typescript
+interface DashboardMetrics {
+  articles: number;              // Total articles in watchlist
+  sources: number;               // Unique sources
+  positive: number;              // Articles with positive sentiment
+  neutral: number;               // Articles with neutral sentiment
+  negative: number;              // Articles with negative sentiment
+}
+```
+
+---
+
+## 2. UI Components
+
+### Article Row Card
+
+Each article displays as a card/row with:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ [THUMBNAIL] │ HEADLINE TEXT                                   │ [BADGE] │
+│             │ Source Name • Published Date                    │  85%    │
+│             │ Short description excerpt text...               │         │
+│             │                                                 │         │
+│             │ [Source Badge] cited by article → [Outlet] ↗    │         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Component Structure (React/Tailwind)
+
+```tsx
+interface ArticleCardProps {
+  article: Article;
+  showSentiment?: boolean;
+}
+
+const ArticleCard = ({ article, showSentiment = true }: ArticleCardProps) => (
+  <Card className="p-4 bg-card/50 border-border/50 hover:border-primary/50 transition-all">
+    <div className="flex gap-4">
+      {/* Optional Thumbnail */}
+      {article.image_url && (
+        <div className="shrink-0 w-24 h-24 rounded-lg overflow-hidden">
+          <img 
+            src={article.image_url} 
+            alt="" 
+            className="w-full h-full object-cover"
+          />
+        </div>
+      )}
+      
+      <div className="flex-1 min-w-0 space-y-2">
+        {/* Title + Sentiment */}
+        <div className="flex items-start justify-between gap-3">
+          <a 
+            href={article.url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-foreground font-medium hover:text-primary transition-colors line-clamp-2"
+          >
+            {article.title}
+          </a>
+          
+          {showSentiment && article.sentiment && (
+            <Badge 
+              variant="outline" 
+              className={getSentimentStyles(article.sentiment)}
+            >
+              {article.sentiment}
+            </Badge>
+          )}
+        </div>
+        
+        {/* Meta: Source + Date */}
+        <p className="text-xs text-muted-foreground">
+          {article.source.name} • {formatDate(article.published_at)}
+        </p>
+        
+        {/* Description */}
+        {article.description && (
+          <p className="text-sm text-muted-foreground line-clamp-2">
+            {article.description}
+          </p>
+        )}
+        
+        {/* Source Attribution */}
+        <div className="flex items-center gap-2 pt-2 border-t border-border/30">
+          <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">
+            {article.source.name}
+          </Badge>
+          <span className="text-xs text-muted-foreground">→</span>
+          <a 
+            href={article.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+          >
+            View Article
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      </div>
+    </div>
+  </Card>
+);
+```
+
+---
+
+## 3. Sentiment Styling
+
+### Sentiment Badge Colors
+
+| Sentiment | Background | Text Color | Border |
+|-----------|------------|------------|--------|
+| positive  | green-500/20 | green-400 | green-500/30 |
+| neutral   | gray-500/20 | gray-400 | gray-500/30 |
+| negative  | red-500/20 | red-400 | red-500/30 |
+
+```typescript
+const getSentimentStyles = (sentiment: 'positive' | 'neutral' | 'negative') => {
+  switch (sentiment) {
+    case 'positive':
+      return 'bg-green-500/20 text-green-400 border-green-500/30';
+    case 'neutral':
+      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    case 'negative':
+      return 'bg-red-500/20 text-red-400 border-red-500/30';
+  }
 };
 ```
 
 ---
 
-## 3. UI Display Rules
+## 4. Dashboard Layout
 
-### Confidence Badge Colors
-
-| Confidence Range | Background | Text Color | Border |
-|------------------|------------|------------|--------|
-| ≥ 80% (0.8)      | green-500/20 | green-400 | green-500/30 |
-| 60-79% (0.6-0.79)| yellow-500/20 | yellow-400 | yellow-500/30 |
-| < 60% (< 0.6)    | red-500/20 | red-400 | red-500/30 |
-
-### Source Type Badge Colors
-
-| Type | Background | Text Color | Border |
-|------|------------|------------|--------|
-| primary | green-500/10 | green-400 | green-500/20 |
-| secondary | yellow-500/10 | yellow-400 | yellow-500/20 |
-| tertiary | orange-500/10 | orange-400 | orange-500/20 |
-
----
-
-## 4. Component Structure (React/Tailwind)
+### Metrics Cards Row
 
 ```tsx
-// ClaimCard Component
-<Card className="p-4 bg-card/50 border-border/50 hover:border-primary/50 transition-all">
-  {/* Header Row: Claim Text + Confidence Badge */}
-  <div className="flex items-start justify-between gap-3">
-    <p className="text-foreground flex-1">{claim.claim_text}</p>
+<div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+  <MetricCard label="ARTICLES" value={metrics.articles} />
+  <MetricCard label="SOURCES" value={metrics.sources} />
+  <MetricCard label="POSITIVE" value={metrics.positive} variant="positive" />
+  <MetricCard label="NEUTRAL" value={metrics.neutral} variant="neutral" />
+  <MetricCard label="NEGATIVE" value={metrics.negative} variant="negative" />
+</div>
+
+const MetricCard = ({ label, value, variant }: MetricCardProps) => (
+  <Card className="p-4 bg-card/50 border-border/50">
+    <p className="text-xs text-muted-foreground uppercase tracking-wide">
+      {label}
+    </p>
     <Badge 
       variant="outline" 
-      className={`shrink-0 ${getConfidenceStyles(claim.confidence)}`}
+      className={`mt-2 text-lg font-mono ${
+        variant === 'positive' ? 'bg-green-500/10 text-green-400' :
+        variant === 'negative' ? 'bg-red-500/10 text-red-400' :
+        variant === 'neutral' ? 'bg-gray-500/10 text-gray-400' :
+        'bg-muted text-foreground'
+      }`}
     >
-      {Math.round(claim.confidence * 100)}%
+      {value}
     </Badge>
+  </Card>
+);
+```
+
+### Topic Sidebar (AI Topic Builder)
+
+```tsx
+<Card className="p-4">
+  <div className="flex items-center gap-2 mb-4">
+    <Sparkles className="h-4 w-4 text-primary" />
+    <h3 className="font-semibold">AI Topic Builder</h3>
   </div>
-
-  {/* Confidence Explanation */}
-  {claim.confidence_explanation && (
-    <p className="text-xs text-muted-foreground mt-2">
-      {claim.confidence_explanation}
-    </p>
-  )}
-
-  {/* Source Chain */}
-  {sourceChain.length > 0 && (
-    <div className="mt-3 pt-3 border-t border-border/30">
-      <div className="flex flex-wrap items-center gap-2">
-        {sourceChain.map((source, idx) => (
-          <div key={idx} className="flex items-center gap-2">
-            {source.url ? (
-              <a href={source.url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="outline" className={getTypeStyles(source.type)}>
-                  {source.name}
-                </Badge>
-                <ExternalLink className="h-3 w-3 ml-1" />
-              </a>
-            ) : (
-              <div className="flex items-center gap-1">
-                <Badge variant="outline" className={getTypeStyles(source.type)}>
-                  {source.name}
-                </Badge>
-                <span className="text-xs text-muted-foreground italic">
-                  cited by article
-                </span>
-              </div>
-            )}
-            {idx < sourceChain.length - 1 && (
-              <span className="text-muted-foreground">→</span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )}
+  
+  <div className="flex gap-2 mb-4">
+    <Input 
+      placeholder="Ask for a theme (e.g., Fed path, chip cycle..." 
+      className="flex-1"
+    />
+    <Button size="sm">Go</Button>
+  </div>
+  
+  <div className="space-y-2">
+    {suggestedTopics.map((topic, idx) => (
+      <button
+        key={idx}
+        onClick={() => onSelectTopic(topic)}
+        className="w-full text-left px-3 py-2 text-sm rounded-lg border border-border/50 hover:bg-muted/50 hover:border-primary/50 transition-all"
+      >
+        {topic}
+      </button>
+    ))}
+  </div>
 </Card>
 ```
 
 ---
 
-## 5. LangGraph Agent Prompt Template
-
-When generating claims from NewsAPI data, use this prompt to structure the output:
-
-```
-You are analyzing news articles to extract verifiable claims with source attribution.
-
-For each significant claim in the article, create a claim object with:
-
-1. **claim_text**: The exact assertion or statement being made. Should be a complete, standalone sentence.
-
-2. **confidence**: A score from 0.0 to 1.0 based on:
-   - 0.8-1.0: Directly quoted from primary source, verifiable, multiple corroborations
-   - 0.6-0.79: Attributed to credible secondary source, consistent with known facts
-   - 0.4-0.59: Single source, unverified, or contains hedging language
-   - 0.0-0.39: Speculation, anonymous sources, or contradicted by other sources
-
-3. **confidence_explanation**: One sentence explaining WHY this confidence level was assigned.
-
-4. **source_chain**: Format as:
-   "{OriginalSource} ({type}) → {ReportingOutlet} ({type}) [{url}]"
-   
-   Types:
-   - primary: Official statements, press releases, direct quotes from involved parties
-   - secondary: News outlets reporting on primary sources
-   - tertiary: Aggregators, opinion pieces, or sources citing other news reports
-
-Example output:
-{
-  "claim_text": "The Prime Minister confirmed that the policy will take effect in January.",
-  "confidence": 0.9,
-  "confidence_explanation": "This is a direct quote from the PM's official spokesperson, confirmed in the press briefing.",
-  "source_chain": "PM's Office (primary) → BBC News (secondary) [https://bbc.com/news/uk-12345]",
-  "position": 1
-}
-```
-
----
-
-## 6. NewsAPI to Claims Mapping
-
-When processing NewsAPI results, map fields as follows:
-
-```typescript
-// From NewsAPI response
-interface NewsAPIArticle {
-  title: string;
-  description: string;
-  content: string;
-  source: { name: string };
-  url: string;
-  publishedAt: string;
-}
-
-// Transform to Source
-const mapToSource = (article: NewsAPIArticle): Source => ({
-  outlet_name: article.source.name,
-  url: article.url,
-  publish_date: article.publishedAt,
-  source_type: 'secondary', // News outlets are typically secondary
-  category: 'News',
-});
-
-// Claims should be extracted from content analysis
-// The source_chain should reference the outlet:
-// "{OriginalSource} (primary) → {article.source.name} (secondary) [{article.url}]"
-```
-
----
-
-## 7. Display Layout Options
-
-### Full Display (Key Claims)
-- Show first 5 claims with full detail
-- Include source chain, confidence explanation
-- Larger padding, more prominent
-
-### Compact Display (Additional Claims)
-- Collapsible cards in a grid layout
-- 2-line text clamp initially
-- Expand on click to show full details
+## 5. Articles List Component
 
 ```tsx
-// Layout structure
-<div className="space-y-6">
-  {/* Key Claims - Full Display */}
-  <div className="space-y-3">
-    {claims.slice(0, 5).map((claim, idx) => (
-      <ClaimCard key={idx} claim={claim} compact={false} />
-    ))}
-  </div>
+interface ArticlesListProps {
+  articles: Article[];
+  isLoading?: boolean;
+}
 
-  {/* Additional Claims - Compact Grid */}
-  {claims.length > 5 && (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-      {claims.slice(5).map((claim, idx) => (
-        <ClaimCard key={idx} claim={claim} compact={true} />
+const ArticlesList = ({ articles, isLoading }: ArticlesListProps) => {
+  if (isLoading) {
+    return (
+      <div className="space-y-3">
+        {[...Array(5)].map((_, i) => (
+          <Skeleton key={i} className="h-32 w-full" />
+        ))}
+      </div>
+    );
+  }
+
+  if (articles.length === 0) {
+    return (
+      <Card className="p-8 text-center">
+        <p className="text-muted-foreground font-mono">
+          No articles available.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {articles.map((article) => (
+        <ArticleCard key={article.id} article={article} />
       ))}
     </div>
-  )}
-</div>
+  );
+};
 ```
 
 ---
 
-## 8. Hover Popup (Optional Enhancement)
+## 6. LangGraph Agent Prompt Template
 
-For desktop, show a detailed popup on hover with:
-- Source traceability breakdown
-- Color-coded source type indicators
-- Category and publish date from matched sources
-- Full confidence explanation
+Use this prompt when processing NewsAPI results with your LangGraph agent:
 
-Position the popup relative to cursor, checking viewport bounds to prevent overflow.
+```
+You are a news research assistant processing articles from NewsAPI. Your task is to:
+
+1. **Analyze sentiment** for each article:
+   - positive: Good news, achievements, growth, solutions
+   - neutral: Factual reporting, balanced coverage, informational
+   - negative: Problems, risks, failures, concerns, warnings
+
+2. **Extract key topics/tags** that describe what the article is about.
+
+3. **Format each article** with this structure:
+
+{
+  "id": "unique-id",
+  "title": "Article headline",
+  "description": "Brief excerpt or summary",
+  "url": "https://...",
+  "image_url": "https://... (if available)",
+  "published_at": "2024-01-15T10:30:00Z",
+  "source": {
+    "name": "Source Name"
+  },
+  "sentiment": "positive" | "neutral" | "negative",
+  "sentiment_score": 0.75, // -1.0 (very negative) to 1.0 (very positive)
+  "topics": ["topic1", "topic2"]
+}
+
+4. **Aggregate metrics**:
+   - Count total articles
+   - Count unique sources
+   - Tally sentiment breakdown (positive/neutral/negative counts)
+
+Return results as a structured object with:
+- articles: Article[]
+- metrics: { articles, sources, positive, neutral, negative }
+```
+
+---
+
+## 7. NewsAPI Integration
+
+### Fetching Articles
+
+```typescript
+const fetchArticles = async (query: string): Promise<Article[]> => {
+  const response = await fetch(
+    `https://newsapi.ai/api/v1/articles?` + 
+    new URLSearchParams({
+      apiKey: NEWSAPI_KEY,
+      keyword: query,
+      articlesCount: '50',
+      articlesSortBy: 'date',
+      includeArticleImage: 'true',
+    })
+  );
+  
+  const data = await response.json();
+  
+  return data.articles.results.map((item: any) => ({
+    id: item.uri,
+    title: item.title,
+    description: item.body?.substring(0, 200) + '...',
+    content: item.body,
+    url: item.url,
+    image_url: item.image,
+    published_at: item.dateTime,
+    source: {
+      name: item.source.title,
+      url: item.source.uri,
+    },
+    // Sentiment should be analyzed by your LangGraph agent
+    sentiment: undefined,
+    sentiment_score: undefined,
+    topics: item.concepts?.map((c: any) => c.label.eng) || [],
+  }));
+};
+```
+
+---
+
+## 8. Watchlist Topics Examples
+
+Pre-configured topic suggestions for the AI Topic Builder:
+
+```typescript
+const defaultTopicSuggestions = [
+  "US inflation soft landing outlook",
+  "AI chip supply chain dynamics",
+  "ECB policy shift expectations",
+  "Semiconductor inventory digestion",
+  "China tech regulation updates",
+  "Energy transition investments",
+  "Fed rate path projections",
+  "Crypto institutional adoption",
+];
+```
 
 ---
 
 ## Summary
 
-The key elements for displaying claims like Grounded:
+Key elements for the News Studio research environment:
 
-1. **Data structure**: Claims with text, confidence (0-1), explanation, and source_chain string
-2. **Source chain format**: `Name (type) [url] → Name (type) [url]`
-3. **Color coding**: Green (≥80%), Yellow (60-79%), Red (<60%)
-4. **Source types**: Primary (green), Secondary (yellow), Tertiary (orange)
-5. **Layout**: Cards with claim text, confidence badge, explanation, and source chain badges
-6. **Interaction**: External links open in new tab, arrows (→) connect the chain
+1. **Data**: Articles with title, source, date, description, sentiment, topics
+2. **Metrics**: Article count, source count, sentiment breakdown (positive/neutral/negative)
+3. **Layout**: Dashboard with metric cards, topic sidebar, article list
+4. **Cards**: Article rows with source badges, external links, optional thumbnails
+5. **Sentiment**: Color-coded (green/gray/red) badges for positive/neutral/negative
+6. **Topics**: AI-suggested research themes, searchable watchlists
+7. **Empty state**: "No articles available." message with monospace font
